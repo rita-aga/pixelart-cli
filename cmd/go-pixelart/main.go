@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/color/palette"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/disintegration/gift"
 	"github.com/esimov/colorquant"
+	colorConvert "github.com/gerow/go-color"
 )
 
 func writeImage(fileName string, file image.Image) {
@@ -58,10 +60,68 @@ func resizeImage(img image.Image) image.Image {
 	return dst
 }
 
+func applyPalette(img image.Image, palette color.Palette) image.Image {
+
+	return img
+
+}
+
+func mapColors(srcColors []color.Color, dstColors []color.Color) map[color.Color]color.Color {
+	result := make(map[color.Color]color.Color)
+
+	for _, c := range srcColors {
+		//
+		pixel := rgbaToPixel(c.RGBA())
+		rgb := colorConvert.RGB{
+			R: float64(pixel.R), G: float64(pixel.G), B: float64(pixel.B),
+		}
+		hsl := colorConvert.RGB.ToHSL(rgb)
+		fmt.Printf("Hue: %v, Saturation: %v, Luminance: %v\n", hsl.H, hsl.S, hsl.L)
+	}
+
+	return result
+}
+
+func uniqueColors(img image.Image) ([]color.Color, error) {
+	bounds := img.Bounds()
+	width, height := bounds.Max.X, bounds.Max.Y
+
+	var pixels [][]Pixel
+	result := make(map[Pixel]int)
+	for y := 0; y < height; y++ {
+		var row []Pixel
+		for x := 0; x < width; x++ {
+			result[rgbaToPixel(img.At(x, y).RGBA())] = 1
+			row = append(row, rgbaToPixel(img.At(x, y).RGBA()))
+		}
+		pixels = append(pixels, row)
+	}
+
+	uniqueColors := make([]color.Color, 0)
+	for k := range result {
+		uniqueColors = append(uniqueColors, color.RGBA{k.R, k.G, k.B, k.A})
+	}
+
+	return uniqueColors, nil
+}
+
+func rgbaToPixel(r uint32, g uint32, b uint32, a uint32) Pixel {
+	return Pixel{uint8(r / 257), uint8(g / 257), uint8(b / 257), uint8(a / 257)}
+}
+
+// Pixel struct example
+type Pixel struct {
+	R uint8
+	G uint8
+	B uint8
+	A uint8
+}
+
 func main() {
-	fileName := "photo.jpg"
+	fileName := "fauna.png"
 
 	colorNum := 6
+	blockNum := 40
 
 	srcImg := openImage(fileName)
 	srcImg = resizeImage(srcImg)
@@ -69,8 +129,17 @@ func main() {
 	width := srcImg.Bounds().Max.X
 	height := srcImg.Bounds().Max.Y
 
+	var pixelateCoeff int
+
+	if width > height {
+		pixelateCoeff = width / blockNum
+	} else {
+		pixelateCoeff = height / blockNum
+	}
+
 	log.Printf("Width: %v", width)
 	log.Printf("Height: %v", height)
+	log.Printf("Pixelate Coeff: %v", pixelateCoeff)
 
 	// web safe image
 	webSafeDst := image.NewPaletted(srcImg.Bounds(), palette.WebSafe)
@@ -83,13 +152,9 @@ func main() {
 
 	// pixelate X color img
 	g := gift.New(
-		// TODO make image smaller first
-		// TODO smart calc for for these values
-		// TODO experiment with sharpness
-		// TODO experiment with adding this in the beginning
-		// gift.Brightness(-15),
-		gift.Contrast(30),
-		gift.Pixelate(width/100),
+		// gift.Brightness(-25),
+		gift.Contrast(20),
+		gift.Pixelate(pixelateCoeff),
 	)
 
 	ltdColorsPixelatedDst := image.NewRGBA(g.Bounds(ltdColorsDst.Bounds()))
@@ -104,14 +169,14 @@ func main() {
 	ltdColorsDst2 := colorquant.NoDither.Quantize(sourcePixelatedDst, sourcePixelatedDst, colorNum, false, true)
 	writeImage("05-websafe-pixelated-X-colors.jpg", ltdColorsDst2)
 
-	// srcImg2 := openImage("tutu_pixelated.jpg")
-	// ltdColorsDst3 := colorquant.NoDither.Quantize(srcImg2, webSafeDst, colorNum, false, true)
-	// writeImage("06-ext-pixelated-to-ltd-color.jpg", ltdColorsDst3)
+	imageColors, err := uniqueColors(ltdColorsDst2)
+	if err != nil {
+		log.Fatalf("Error extracting colors: %v", err)
+	}
+	log.Printf("Number of unique colors: %v", len(imageColors))
+	log.Print(imageColors)
 
-	ltdColorsDst4 := colorquant.NoDither.Quantize(ltdColorsPixelatedDst, ltdColorsPixelatedDst, colorNum, false, true)
-	writeImage("07-websafe-X-colors-pixelated-X-colors.jpg", ltdColorsDst4)
-
-	colors := []color.Color{
+	myColors := []color.Color{
 		color.RGBA{84, 19, 136, 255},
 		color.RGBA{217, 3, 104, 255},
 		color.RGBA{241, 233, 218, 255},
@@ -120,24 +185,21 @@ func main() {
 		color.RGBA{49, 175, 212, 255},
 	}
 
-	myPalette := color.Palette(colors)
+	mapColors(imageColors, myColors)
 
-	myColorDst := image.NewPaletted(srcImg.Bounds(), myPalette)
-	draw.Draw(myColorDst, srcImg.Bounds(), ltdColorsDst4, image.ZP, draw.Over)
-	writeImage("08-websafe-X-colors-pixelated-X-colors-my-color.jpg", myColorDst)
+	// myPalette := color.Palette(myColors)
 
-	// ditherer := colorquant.Dither{
-	// 	[][]float32{
-	// 		[]float32{0.0, 0.0, 0.0, 7.0 / 48.0, 5.0 / 48.0},
-	// 		[]float32{3.0 / 48.0, 5.0 / 48.0, 7.0 / 48.0, 5.0 / 48.0, 3.0 / 48.0},
-	// 		[]float32{1.0 / 48.0, 3.0 / 48.0, 5.0 / 48.0, 3.0 / 48.0, 1.0 / 48.0},
-	// 	},
-	// }
-	// pm2 := ditherer.Quantize(img, pm, 6, true, true)
-	// draw.Draw(pm2, img.Bounds(), img, image.ZP, draw.Over)
+	// myColorDst := image.NewPaletted(srcImg.Bounds(), myPalette)
+	// draw.Draw(myColorDst, srcImg.Bounds(), ltdColorsDst4, image.ZP, draw.Over)
+	// writeImage("08-websafe-X-colors-pixelated-X-colors-my-color.jpg", myColorDst)
 
-	// [TODO] extract palette from recolored-no-dither
-	// [TODO] map colors to colors from my palette
-	// [TODO] recolor pixels if image using mapping
+	// NOTES
+	// first use this to split image into X color evenly distant from each other then sharp pixelate
+	// extract palette from recolored-no-dither
+	// map colors to colors from my palette
+	// recolor pixels if image using mapping
+	// smart calc for for contrast filter values
+	// experiment with sharpness
+	// experiment with adding contrast/brightness/sharpness as first step
 
 }
